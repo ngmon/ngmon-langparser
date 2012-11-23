@@ -2,7 +2,9 @@ package cz.muni.fi.langparser;
 
 import cz.muni.fi.publishsubscribe.countingtree.AttributeValue;
 import cz.muni.fi.publishsubscribe.countingtree.Constraint;
+import cz.muni.fi.publishsubscribe.countingtree.LongRange;
 import cz.muni.fi.publishsubscribe.countingtree.Operator;
+import java.text.ParseException;
 import java.util.Calendar;
 import java.util.Date;
 import java.util.GregorianCalendar;
@@ -15,7 +17,6 @@ public class LangParser {
     
     private final String attributeName;
     private final String input;
-    private String error = "";
     private int currentPos = 0;
     private char current;
     private String alreadyRead = "";
@@ -26,21 +27,19 @@ public class LangParser {
     }
 
     public Constraint parse() {
-        Constraint constraint;
+        Constraint constraint = null;
         try {
             constraint = expr();
-        } catch (IndexOutOfBoundsException e) {
-            putError("Unexpected end of input");
-            return null;
+        } catch (IndexOutOfBoundsException | UnsupportedOperationException | ParseException e) {
+            //TODO
         }
         
         return constraint;
     }
     
-    private Constraint expr() {
+    private Constraint expr() throws ParseException {
         if (!accept('#')) {
-            putErrorExpected('#');
-            return null;
+            throw new ParseException("# expected", currentPos);
         }
         
         AttributeValue av = null;
@@ -48,14 +47,14 @@ public class LangParser {
         
         if (accept('l')) {
             if (accept('t')) {
-                av = argNum();
                 operator = Operator.LESS_THAN;
+                av = argNum();
             } else {
                 if (accept('e')) {
-                    av = argNum();
                     operator = Operator.LESS_THAN_OR_EQUAL_TO;
+                    av = argNum();
                 } else {
-                    putError("Unsupported Operator");
+                    throw new ParseException("Unsupported Operator", currentPos);
                 }
             }
             return createConstraint(av, operator);
@@ -70,7 +69,7 @@ public class LangParser {
                     av = argNum();
                     operator = Operator.GREATER_THAN_OR_EQUAL_TO;
                 } else {
-                    putError("Unsupported Operator");
+                    throw new ParseException("Unsupported Operator", currentPos);
                 }
             }
             return createConstraint(av, operator);
@@ -81,7 +80,7 @@ public class LangParser {
                 av = argAny();
                 operator = Operator.EQUALS;
             } else {
-                putError("Unsupported Operator");
+                throw new ParseException("Unsupported Operator", currentPos);
             }
             return createConstraint(av, operator);
         }
@@ -92,10 +91,10 @@ public class LangParser {
                     av = argNum_argNum();
                     operator = Operator.RANGE;
                 } else {
-                    putError("Unsupported Operator");
+                    throw new ParseException("Unsupported Operator", currentPos);
                 }
             } else {
-                putError("Unsupported Operator");
+                throw new ParseException("Unsupported Operator", currentPos);
             }
             return createConstraint(av, operator);
         }
@@ -107,13 +106,13 @@ public class LangParser {
                         av = argAny(); //TODO enforce String?
                         operator = Operator.PREFIX;
                     } else {
-                        putError("Unsupported Operator");
+                        throw new ParseException("Unsupported Operator", currentPos);
                     }
                 } else {
-                    putError("Unsupported Operator");
+                    throw new ParseException("Unsupported Operator", currentPos);
                 }
             } else {
-                putError("Unsupported Operator");
+                throw new ParseException("Unsupported Operator", currentPos);
             }
             return createConstraint(av, operator);
         }
@@ -122,16 +121,17 @@ public class LangParser {
         return createConstraint(av, operator);
     }
     
-    private AttributeValue argNum() {
+    private AttributeValue argNum() throws ParseException {
         if (! accept(' ')) {
-            putErrorExpected(' ');
-            return null;
+            throw new ParseException("Space expected", currentPos);
         }
+        
+        alreadyRead = "";
         
         if ((current = eatChar()) == '-') { //expect negative number
             alreadyRead += current;
-            while (currentPos < input.length()) {
-                alreadyRead += eatChar();
+            while ((currentPos < input.length()) && (eatCharIfNotSpace())) {
+                alreadyRead += current;
             }
             
             return createNumericAttributeValue();
@@ -146,131 +146,127 @@ public class LangParser {
         int sec;
                 
         alreadyRead += current;
-        while ((currentPos < input.length()) && ((current = eatChar()) != ' ')) {
+        while ((currentPos < input.length()) && (eatCharIfNotSpace())) {
             if (current == '-') { //expect date (y-m-dTh:m:s)
                 year = getInteger(alreadyRead);
-                if (year == -1) {
-                    return null;
-                }
-                
                 month = getIntegerUntil('-');
-                if (month == -1) {
-                    putError("Integer expected");
-                    return null;
-                }
-                
                 day = getIntegerUntil('T');
-                if (day == -1) {
-                    putError("Integer expected");
-                    return null;
-                }
-                
                 dateEndsAt = alreadyRead.length() + 1;
             }
             
             if (current == ':') { //expect time (h:m:s)
                 hour = getInteger(alreadyRead.substring(dateEndsAt));
-                if (hour == -1) {
-                    return null;
-                }
-                
                 min = getIntegerUntil(':');
-                if (min == -1) {
-                    putError("Integer expected");
-                    return null;
-                }
-                
                 alreadyRead += current;
                 String seconds = "";
-                while ((currentPos < input.length()) && ((current = eatChar()) != ' ')) {
+                while ((currentPos < input.length()) && (eatCharIfNotSpace())) {
                     seconds += current;
                     alreadyRead += current;
                 }
                 
                 if (currentPos == input.length()) {
                     sec = getInteger(seconds);
-                    if (sec == -1) {
-                        return null;
-                    }
                     if (dateEndsAt == 0) {
                         //TODO AttributeValue<Time>...
-                        putError("Time not supported yet");
-                        return null;
+                        throw new UnsupportedOperationException("Time not supported yet");
                     } else {
                         Calendar dateTime = new GregorianCalendar(year, month, day, hour, min, sec);
-                        return new AttributeValue<Date>(dateTime.getTime(), Date.class);
+                        return new AttributeValue<>(dateTime.getTime(), Date.class);
                     }
-                }
-                if (current == ' ') {
-                    alreadyRead += current;
-                    putError("No space expected at position " + (currentPos - 1));
-                    return null;
                 }
             }
             alreadyRead += current;
-        }
-        
-        if (currentPos < input.length()) {
-            putError("No space expected at position " + (currentPos - 1));
-            return null;
-        }
-        
-        if (alreadyRead.equals("")) {
-            putError("Exactly one argument expected");
-            return null;
         }
         
         //else expect positive integer
         return createNumericAttributeValue();
     }
     
-    private AttributeValue argAny() {
-        AttributeValue av = argNum();
+    private AttributeValue argAny() throws ParseException {
+        AttributeValue av = null;
+        try {
+            av = argNum();
+        } catch (ParseException | UnsupportedOperationException e) {
+            //TODO
+        }
         
         if (current == ' ') {
-            putError("No space expected at position " + (currentPos - 1));
-            return null;
+            throw new ParseException("No space expected", currentPos - 1);
         }
         
         if (av == null && (! alreadyRead.equals(""))) {
-            while ((currentPos < input.length()) && ((current = eatChar()) != ' ')) {
+            while ((currentPos < input.length()) && (eatCharIfNotSpace())) {
                 alreadyRead += current;
             }
             
-            if (currentPos < input.length()) {
-                putError("No space expected at position " + (currentPos - 1));
-                return null;
-            }
-            
             if (alreadyRead.trim().length() == 0) {
-                putError("No space expected at position " + (currentPos - 1));
-                return null;
+                throw new ParseException("No space expected", currentPos - 1);
             }
             
-            av = new AttributeValue<String>(alreadyRead, String.class);
+            av = new AttributeValue<>(alreadyRead, String.class);
         }
         
         return av;
     }
     
-    private AttributeValue argNum_argNum() {
-        if (! accept(' ')) {
-            putErrorExpected(' ');
-            return null;
+    private AttributeValue argNum_argNum() throws ParseException {
+        AttributeValue av1 = argNum();
+        
+        if (av1.getType() == Date.class) {
+            AttributeValue av2 = argNum();
+            
+            if (av2.getType() == Date.class) {
+                //TODO return new AttributeValue<DateRange>...
+                throw new UnsupportedOperationException("DateRange not supported yet");
+            } else {
+                throw new ParseException("Type mismatch", currentPos);
+            }
         }
         
-        AttributeValue av = null;
+        //TODO time
         
-        //TODO
-        putError("Range not supported yet");
+        if (av1.getType() == Double.class) {
+            AttributeValue av2 = argNum();
+            
+            if ((av2.getType() == Double.class) || (av2.getType() == Long.class)) {
+                //TODO return new AttributeValue<DoubleRange>...
+                throw new UnsupportedOperationException("DoubleRange not supported yet");
+            } else {
+                throw new ParseException("Type mismatch", currentPos);
+            }
+        }
         
-        return av;
+        if (av1.getType() == Long.class) {
+            AttributeValue av2 = argNum();
+            
+            if (av2.getType() == Long.class) {
+                return new AttributeValue<>(new LongRange((Long)av1.getValue(), (Long)av2.getValue()), LongRange.class);
+            } else {
+                if (av2.getType() == Double.class) {
+                    //TODO return new AttributeValue<DoubleRange>...
+                    throw new UnsupportedOperationException("DoubleRange not supported yet");
+                } else {
+                    throw new ParseException("Type mismatch", currentPos);
+                }
+            }
+        }
+        
+        throw new ParseException(av1.getType() + " not supported", currentPos);
     }
     
     private char eatChar() {
         char next = input.charAt(currentPos);
         currentPos++;
         return next;
+    }
+    
+    private boolean eatCharIfNotSpace() {
+        if (input.charAt(currentPos) == ' ') {
+            return false;
+        } else {
+            current = eatChar();
+            return true;
+        }
     }
     
     private boolean accept(char c) {
@@ -282,82 +278,72 @@ public class LangParser {
         }
     }
     
-    private AttributeValue createNumericAttributeValue() {
+    private AttributeValue createNumericAttributeValue() throws ParseException {
         AttributeValue av;
         
         try {
             Long num = Long.parseLong(alreadyRead);
-            av = new AttributeValue<Long>(num, Long.class);
+            av = new AttributeValue<>(num, Long.class);
         } catch (NumberFormatException e) {
             try {
-                Double num = Double.parseDouble(alreadyRead);
-                av = new AttributeValue<Double>(num, Double.class);
+//                Double num = Double.parseDouble(alreadyRead);
+//                av = new AttributeValue<Double>(num, Double.class);
                 
                 //TODO
-                putError("Non-integer values not supported yet");
-                return null;
-                
+                throw new UnsupportedOperationException("Non-integer values not supported yet");
             } catch (NumberFormatException ex) {
-                return null;
+                throw new ParseException("Number expected", currentPos);
             }
         }
 
         return av;
     }
     
-    private int getInteger(String s) { //expect non-negative integer
+    private int getInteger(String s) throws ParseException { //expect non-negative integer
         int num;
         try {
             num = Integer.parseInt(s);
         } catch (NumberFormatException e) {
-            putError("Integer expected");
-            return -1;
+            throw new ParseException("Integer expected", currentPos);
         }
         return num;
     }
     
-    private int getIntegerUntil(char until) {
+    private int getIntegerUntil(char until) throws ParseException {
         alreadyRead += current;
         String string = "";
-        while ((currentPos < input.length()) && ((current = eatChar()) != ' ') && (current != until)) {
+        while ((currentPos < input.length()) && (eatCharIfNotSpace()) && (current != until)) {
             string += current;
             alreadyRead += current;
         }
         
-        if (currentPos == input.length()) {
-            return -1;
-        }
-        if (current == ' ') {
-            alreadyRead += current;
-            return -1;
+        if ((currentPos == input.length()) || (current == ' ')) {
+            throw new ParseException("Unexpected end of input", currentPos);
         }
         
         return getInteger(string);
     }
     
-    private Constraint createConstraint(AttributeValue av, Operator operator) {
+    private Constraint createConstraint(AttributeValue av, Operator operator) throws ParseException {
+        if (! isLastArg()) {
+            throw new ParseException("End of input expected", currentPos);
+        }
+        
         if (av == null) {
-            putError("Failed to parse \'" + alreadyRead + "\'");
-            return null;
+            throw new ParseException("Failed to parse \'" + alreadyRead + "\'", currentPos);
         }
         
         if (operator == null) {
-            putError("Unsupported Operator");
-            return null;
+            throw new ParseException("Unsupported Operator", currentPos);
         }
         
         return new Constraint(attributeName, av, operator);
     }
     
-    private void putErrorExpected(char c) {
-        error += "Expected \'" + c + "\', found \'" + input.charAt(currentPos) + "\'\n";
-    }
-    
-    private void putError(String s) {
-        error += s + "\n";
-    }
-    
-    public String getErrorMessage() {
-        return error;
+    private boolean isLastArg() {
+        if (currentPos < input.length()) {
+            return false;
+        }
+        return true;
     }
 }
