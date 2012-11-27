@@ -26,13 +26,13 @@ public class LangParser {
         this.input = input;
     }
 
-    public Constraint parse() {
+    public Constraint parse() throws ParseException {
         Constraint constraint = null;
-        try {
+//        try {
             constraint = expr();
-        } catch (IndexOutOfBoundsException | UnsupportedOperationException | ParseException e) {
-            //TODO
-        }
+//        } catch (IndexOutOfBoundsException | UnsupportedOperationException | ParseException e) {
+//            //TODO
+//        }
         
         return constraint;
     }
@@ -122,8 +122,8 @@ public class LangParser {
     }
     
     private AttributeValue argNum() throws ParseException {
-        if (! accept(' ')) {
-            throw new ParseException("Space expected", currentPos);
+        if (! acceptSpace()) {
+            throw new ParseException("Exactly one space expected", currentPos);
         }
         
         alreadyRead = "";
@@ -278,24 +278,38 @@ public class LangParser {
         }
     }
     
+    private boolean acceptSpace() { //exactly one space
+        if (accept(' ')) {
+            if (currentPos < input.length()) {
+                if (input.charAt(currentPos) == ' ') {
+                    return false;
+                } else {
+                    return true;
+                }
+            } else {
+                return true;
+            }
+        } else {
+            return false;
+        }
+    }
+    
     private AttributeValue createNumericAttributeValue() throws ParseException {
         AttributeValue av;
         
         try {
-            Long num = Long.parseLong(alreadyRead);
-            av = new AttributeValue<>(num, Long.class);
-        } catch (NumberFormatException e) {
-            try {
-//                Double num = Double.parseDouble(alreadyRead);
-//                av = new AttributeValue<Double>(num, Double.class);
-                
+            Double num = Double.valueOf(alreadyRead);
+            if (num.longValue() == num) {
+                av = new AttributeValue<>(num.longValue(), Long.class);
+            } else {
+//                av = new AttributeValue<>(num, Double.class);
                 //TODO
-                throw new UnsupportedOperationException("Non-integer values not supported yet");
-            } catch (NumberFormatException ex) {
-                throw new ParseException("Number expected", currentPos);
+                throw new UnsupportedOperationException("Non-integer values not supported yet + \"" + alreadyRead + "\"");
             }
+        } catch (NumberFormatException e) {
+            throw new ParseException("Number expected", currentPos);
         }
-
+        
         return av;
     }
     
