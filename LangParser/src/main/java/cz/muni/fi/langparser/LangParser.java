@@ -9,10 +9,6 @@ import java.util.Calendar;
 import java.util.Date;
 import java.util.GregorianCalendar;
 
-/*
- * Inspired by John B. Matthews (https://sites.google.com/site/drjohnbmatthews/enumerated-functions) 
-           and Hugh Perkins (https://github.com/hughperkins/jfastparser/blob/master/src/jfastparser/Parser.java)
- */
 public class LangParser {
     
     private final String attributeName;
@@ -26,109 +22,62 @@ public class LangParser {
         this.input = input;
     }
 
-    public Constraint parse() throws ParseException {
-        Constraint constraint = null;
-//        try {
-            constraint = expr();
-//        } catch (IndexOutOfBoundsException | UnsupportedOperationException | ParseException e) {
-//            //TODO
-//        }
-        
-        return constraint;
-    }
-    
-    private Constraint expr() throws ParseException {
-        if (!accept('#')) {
-            throw new ParseException("# expected", currentPos);
-        }
-        
-        AttributeValue av = null;
+    public Constraint<?> parse() throws ParseException, IndexOutOfBoundsException {
+        AttributeValue<?> av = null;
         Operator operator = null;
         
-        if (accept('l')) {
-            if (accept('t')) {
-                operator = Operator.LESS_THAN;
-                av = argNum();
-            } else {
-                if (accept('e')) {
-                    operator = Operator.LESS_THAN_OR_EQUAL_TO;
-                    av = argNum();
-                } else {
-                    throw new ParseException("Unsupported Operator", currentPos);
-                }
-            }
-            return createConstraint(av, operator);
+        switch (op()) {
+            case "#lt"  : operator = Operator.LESS_THAN;
+                          av = argNum();
+                          break;
+            case "#le"  : operator = Operator.LESS_THAN_OR_EQUAL_TO;
+                          av = argNum();
+                          break;
+            case "#gt"  : operator = Operator.GREATER_THAN;
+                          av = argNum();
+                          break;
+            case "#ge"  : operator = Operator.GREATER_THAN_OR_EQUAL_TO;
+                          av = argNum();
+                          break;
+            case "#eq"  : operator = Operator.EQUALS;
+                          av = argAny();
+                          break;
+            case "#rng" : operator = Operator.RANGE;
+                          av = argNum_argNum();
+                          break;
+            case "#pref": operator = Operator.PREFIX;
+                          av = argAny(); //TODO enforce String?
+                          break;
+            //TODO case "#suff"
+                
+            default: throw new ParseException("Unsupported Operator", currentPos);
         }
-        
-        if (accept('g')) {
-            if (accept('t')) {
-                av = argNum();
-                operator = Operator.GREATER_THAN;
-            } else {
-                if (accept('e')) {
-                    av = argNum();
-                    operator = Operator.GREATER_THAN_OR_EQUAL_TO;
-                } else {
-                    throw new ParseException("Unsupported Operator", currentPos);
-                }
-            }
-            return createConstraint(av, operator);
-        }
-        
-        if (accept('e')) {
-            if (accept('q')) {
-                av = argAny();
-                operator = Operator.EQUALS;
-            } else {
-                throw new ParseException("Unsupported Operator", currentPos);
-            }
-            return createConstraint(av, operator);
-        }
-        
-        if (accept('r')) {
-            if (accept('n')) {
-                if (accept('g')) {
-                    av = argNum_argNum();
-                    operator = Operator.RANGE;
-                } else {
-                    throw new ParseException("Unsupported Operator", currentPos);
-                }
-            } else {
-                throw new ParseException("Unsupported Operator", currentPos);
-            }
-            return createConstraint(av, operator);
-        }
-        
-        if (accept('p')) {
-            if (accept('r')) {
-                if (accept('e')) {
-                    if (accept('f')) {
-                        av = argAny(); //TODO enforce String?
-                        operator = Operator.PREFIX;
-                    } else {
-                        throw new ParseException("Unsupported Operator", currentPos);
-                    }
-                } else {
-                    throw new ParseException("Unsupported Operator", currentPos);
-                }
-            } else {
-                throw new ParseException("Unsupported Operator", currentPos);
-            }
-            return createConstraint(av, operator);
-        }
-        //TODO add SUFFIX
         
         return createConstraint(av, operator);
     }
     
-    private AttributeValue argNum() throws ParseException {
+    private String op() {
+        String op = "";
+        while ((currentPos < input.length()) && (eatCharIfNotSpace())) {
+            op += current;
+        }
+        
+        return op;
+    }
+    
+    private AttributeValue<?> argNum() throws ParseException {
         if (! acceptSpace()) {
             throw new ParseException("Exactly one space expected", currentPos);
         }
         
         alreadyRead = "";
         
-        if ((current = eatChar()) == '-') { //expect negative number
+        current = eatChar();
+        if (current == '\'') { //expect quoted String -> if acceptable, argAny will take care of it
+            throw new ParseException("Number expected", currentPos);
+        }
+        
+        if (current == '-') { //expect negative number
             alreadyRead += current;
             while ((currentPos < input.length()) && (eatCharIfNotSpace())) {
                 alreadyRead += current;
@@ -144,7 +93,7 @@ public class LangParser {
         int hour;
         int min;
         int sec;
-                
+        
         alreadyRead += current;
         while ((currentPos < input.length()) && (eatCharIfNotSpace())) {
             if (current == '-') { //expect date (y-m-dTh:m:s)
@@ -182,38 +131,48 @@ public class LangParser {
         return createNumericAttributeValue();
     }
     
-    private AttributeValue argAny() throws ParseException {
-        AttributeValue av = null;
+    private AttributeValue<?> argAny() throws ParseException {
+        AttributeValue<?> av = null;
         try {
             av = argNum();
         } catch (ParseException | UnsupportedOperationException e) {
             //TODO
         }
         
-        if (current == ' ') {
-            throw new ParseException("No space expected", currentPos - 1);
-        }
-        
-        if (av == null && (! alreadyRead.equals(""))) {
-            while ((currentPos < input.length()) && (eatCharIfNotSpace())) {
-                alreadyRead += current;
+        if (av == null) {
+            if (alreadyRead.equals("")) { //only possible if the first char was a space or '
+                switch (current) {
+                    case ' ' : throw new ParseException("No space expected", currentPos - 1);
+                    case '\'': while ((currentPos < input.length()) && ((current = eatChar()) != '\'')) {
+                                   alreadyRead += current;
+                               }
+                               if (current == '\'') {
+                                   av = new AttributeValue<>(alreadyRead, String.class);
+                               } else {
+                                   throw new ParseException("Closing quote expected", currentPos);
+                               }
+                }
+            } else {
+                while ((currentPos < input.length()) && (eatCharIfNotSpace())) {
+                    alreadyRead += current;
+                }
+
+                if (alreadyRead.trim().length() == 0) {
+                    throw new ParseException("No space expected", currentPos - 1);
+                }
+
+                av = new AttributeValue<>(alreadyRead, String.class);
             }
-            
-            if (alreadyRead.trim().length() == 0) {
-                throw new ParseException("No space expected", currentPos - 1);
-            }
-            
-            av = new AttributeValue<>(alreadyRead, String.class);
         }
         
         return av;
     }
     
-    private AttributeValue argNum_argNum() throws ParseException {
-        AttributeValue av1 = argNum();
+    private AttributeValue<?> argNum_argNum() throws ParseException {
+        AttributeValue<?> av1 = argNum();
         
         if (av1.getType() == Date.class) {
-            AttributeValue av2 = argNum();
+            AttributeValue<?> av2 = argNum();
             
             if (av2.getType() == Date.class) {
                 //TODO return new AttributeValue<DateRange>...
@@ -226,7 +185,7 @@ public class LangParser {
         //TODO time
         
         if (av1.getType() == Double.class) {
-            AttributeValue av2 = argNum();
+            AttributeValue<?> av2 = argNum();
             
             if ((av2.getType() == Double.class) || (av2.getType() == Long.class)) {
                 //TODO return new AttributeValue<DoubleRange>...
@@ -237,7 +196,7 @@ public class LangParser {
         }
         
         if (av1.getType() == Long.class) {
-            AttributeValue av2 = argNum();
+            AttributeValue<?> av2 = argNum();
             
             if (av2.getType() == Long.class) {
                 return new AttributeValue<>(new LongRange((Long)av1.getValue(), (Long)av2.getValue()), LongRange.class);
@@ -294,8 +253,8 @@ public class LangParser {
         }
     }
     
-    private AttributeValue createNumericAttributeValue() throws ParseException {
-        AttributeValue av;
+    private AttributeValue<?> createNumericAttributeValue() throws ParseException {
+        AttributeValue<?> av;
         
         try {
             Double num = Double.valueOf(alreadyRead);
@@ -316,7 +275,7 @@ public class LangParser {
     private int getInteger(String s) throws ParseException { //expect non-negative integer
         int num;
         try {
-            num = Integer.parseInt(s);
+            num = Integer.valueOf(s);
         } catch (NumberFormatException e) {
             throw new ParseException("Integer expected", currentPos);
         }
@@ -338,7 +297,7 @@ public class LangParser {
         return getInteger(string);
     }
     
-    private Constraint createConstraint(AttributeValue av, Operator operator) throws ParseException {
+    private Constraint<?> createConstraint(AttributeValue<?> av, Operator operator) throws ParseException {
         if (! isLastArg()) {
             throw new ParseException("End of input expected", currentPos);
         }
@@ -351,7 +310,7 @@ public class LangParser {
             throw new ParseException("Unsupported Operator", currentPos);
         }
         
-        return new Constraint(attributeName, av, operator);
+        return new Constraint<>(attributeName, av, operator);
     }
     
     private boolean isLastArg() {
