@@ -179,6 +179,23 @@ public class LangParserTestCase { //TODO test the rest
         assertEquals(String.class, constraint.getAttributeValue().getType());
         assertEquals("abc", constraint.getAttributeValue().getValue());
         assertEquals(Operator.PREFIX, constraint.getOperator());
+        
+        parser = new LangParser(ATTRIBUTE_NAME, "#pref 'quoted String'");
+        constraint = parser.parse();
+        assertEquals(String.class, constraint.getAttributeValue().getType());
+        assertEquals("quoted String", constraint.getAttributeValue().getValue());
+    }
+    
+    @Test(expected = ParseException.class)
+    public void testFailSpaceAtTheEndPref() throws IndexOutOfBoundsException, UnsupportedOperationException, ParseException {
+        LangParser parser = new LangParser(ATTRIBUTE_NAME, "#pref space ");
+        parser.parse();
+    }
+    
+    @Test(expected = ParseException.class)
+    public void testFailNoClosingQuotePref() throws IndexOutOfBoundsException, UnsupportedOperationException, ParseException {
+        LangParser parser = new LangParser(ATTRIBUTE_NAME, "#pref 'no closing quote");
+        parser.parse();
     }
     
     @Test(expected = ParseException.class)

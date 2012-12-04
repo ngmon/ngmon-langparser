@@ -10,13 +10,13 @@ import java.util.Date;
 import java.util.GregorianCalendar;
 
 public class LangParser {
-    
+
     private final String attributeName;
     private final String input;
     private int currentPos = 0;
     private char current;
     private String alreadyRead = "";
-    
+
     public LangParser(String attributeName, String input) {
         this.attributeName = attributeName;
         this.input = input;
@@ -25,67 +25,66 @@ public class LangParser {
     public Constraint<?> parse() throws ParseException, IndexOutOfBoundsException {
         AttributeValue<?> av = null;
         Operator operator = null;
-        
-        switch (op()) {
-            case "#lt"  : operator = Operator.LESS_THAN;
-                          av = argNum();
-                          break;
-            case "#le"  : operator = Operator.LESS_THAN_OR_EQUAL_TO;
-                          av = argNum();
-                          break;
-            case "#gt"  : operator = Operator.GREATER_THAN;
-                          av = argNum();
-                          break;
-            case "#ge"  : operator = Operator.GREATER_THAN_OR_EQUAL_TO;
-                          av = argNum();
-                          break;
-            case "#eq"  : operator = Operator.EQUALS;
-                          av = argAny();
-                          break;
-            case "#rng" : operator = Operator.RANGE;
-                          av = argNum_argNum();
-                          break;
-            case "#pref": operator = Operator.PREFIX;
-                          av = argAny(); //TODO enforce String?
-                          break;
+
+        switch (readString()) {
+            case "#lt":
+                operator = Operator.LESS_THAN;
+                av = argNum();
+                break;
+            case "#le":
+                operator = Operator.LESS_THAN_OR_EQUAL_TO;
+                av = argNum();
+                break;
+            case "#gt":
+                operator = Operator.GREATER_THAN;
+                av = argNum();
+                break;
+            case "#ge":
+                operator = Operator.GREATER_THAN_OR_EQUAL_TO;
+                av = argNum();
+                break;
+            case "#eq":
+                operator = Operator.EQUALS;
+                av = argAny();
+                break;
+            case "#rng":
+                operator = Operator.RANGE;
+                av = argNum_argNum();
+                break;
+            case "#pref":
+                operator = Operator.PREFIX;
+                av = argString();
+                break;
             //TODO case "#suff"
-                
-            default: throw new ParseException("Unsupported Operator", currentPos);
+
+            default:
+                throw new ParseException("Unsupported Operator", currentPos);
         }
-        
+
         return createConstraint(av, operator);
     }
-    
-    private String op() {
-        String op = "";
-        while ((currentPos < input.length()) && (eatCharIfNotSpace())) {
-            op += current;
-        }
-        
-        return op;
-    }
-    
+
     private AttributeValue<?> argNum() throws ParseException {
         if (! acceptSpace()) {
             throw new ParseException("Exactly one space expected", currentPos);
         }
-        
+
         alreadyRead = "";
-        
-        current = eatChar();
+
+        current = readChar();
         if (current == '\'') { //expect quoted String -> if acceptable, argAny will take care of it
             throw new ParseException("Number expected", currentPos);
         }
-        
+
         if (current == '-') { //expect negative number
             alreadyRead += current;
-            while ((currentPos < input.length()) && (eatCharIfNotSpace())) {
+            while ((!isLastArg()) && (readCharIfNotSpace())) {
                 alreadyRead += current;
             }
-            
+
             return createNumericAttributeValue();
         }
-        
+
         int dateEndsAt = 0;
         int year = 0;
         int month = 0;
@@ -93,27 +92,24 @@ public class LangParser {
         int hour;
         int min;
         int sec;
-        
+
         alreadyRead += current;
-        while ((currentPos < input.length()) && (eatCharIfNotSpace())) {
+        while ((!isLastArg()) && (readCharIfNotSpace())) {
             if (current == '-') { //expect date (y-m-dTh:m:s)
                 year = getInteger(alreadyRead);
-                month = getIntegerUntil('-');
-                day = getIntegerUntil('T');
+                month = readIntegerUntil('-');
+                day = readIntegerUntil('T');
                 dateEndsAt = alreadyRead.length() + 1;
             }
-            
+
             if (current == ':') { //expect time (h:m:s)
                 hour = getInteger(alreadyRead.substring(dateEndsAt));
-                min = getIntegerUntil(':');
+                min = readIntegerUntil(':');
                 alreadyRead += current;
-                String seconds = "";
-                while ((currentPos < input.length()) && (eatCharIfNotSpace())) {
-                    seconds += current;
-                    alreadyRead += current;
-                }
-                
-                if (currentPos == input.length()) {
+                String seconds = readString();
+                alreadyRead += seconds;
+
+                if (isLastArg()) {
                     sec = getInteger(seconds);
                     if (dateEndsAt == 0) {
                         //TODO AttributeValue<Time>...
@@ -126,11 +122,11 @@ public class LangParser {
             }
             alreadyRead += current;
         }
-        
+
         //else expect positive integer
         return createNumericAttributeValue();
     }
-    
+
     private AttributeValue<?> argAny() throws ParseException {
         AttributeValue<?> av = null;
         try {
@@ -138,24 +134,17 @@ public class LangParser {
         } catch (ParseException | UnsupportedOperationException e) {
             //TODO
         }
-        
+
         if (av == null) {
             if (alreadyRead.equals("")) { //only possible if the first char was a space or '
                 switch (current) {
-                    case ' ' : throw new ParseException("No space expected", currentPos - 1);
-                    case '\'': while ((currentPos < input.length()) && ((current = eatChar()) != '\'')) {
-                                   alreadyRead += current;
-                               }
-                               if (current == '\'') {
-                                   av = new AttributeValue<>(alreadyRead, String.class);
-                               } else {
-                                   throw new ParseException("Closing quote expected", currentPos);
-                               }
+                    case ' ':
+                        throw new ParseException("No space expected", currentPos - 1);
+                    case '\'':
+                        av = readQuotedString();
                 }
             } else {
-                while ((currentPos < input.length()) && (eatCharIfNotSpace())) {
-                    alreadyRead += current;
-                }
+                alreadyRead += readString();
 
                 if (alreadyRead.trim().length() == 0) {
                     throw new ParseException("No space expected", currentPos - 1);
@@ -164,16 +153,43 @@ public class LangParser {
                 av = new AttributeValue<>(alreadyRead, String.class);
             }
         }
-        
+
         return av;
     }
-    
+
+    private AttributeValue<?> argString() throws ParseException {
+        if (!acceptSpace()) {
+            throw new ParseException("Exactly one space expected", currentPos);
+        }
+
+        AttributeValue<String> av = null;
+        alreadyRead = "";
+        current = readChar();
+
+        switch (current) {
+            case ' ':
+                throw new ParseException("No space expected", currentPos - 1);
+            case '\'':
+                av = readQuotedString();
+                break;
+            default:
+                alreadyRead += current + readString();
+                if (isLastArg()) {
+                    av = new AttributeValue<>(alreadyRead, String.class);
+                } else {
+                    throw new ParseException("No space expected", currentPos);
+                }
+        }
+
+        return av;
+    }
+
     private AttributeValue<?> argNum_argNum() throws ParseException {
         AttributeValue<?> av1 = argNum();
-        
+
         if (av1.getType() == Date.class) {
             AttributeValue<?> av2 = argNum();
-            
+
             if (av2.getType() == Date.class) {
                 //TODO return new AttributeValue<DateRange>...
                 throw new UnsupportedOperationException("DateRange not supported yet");
@@ -181,12 +197,12 @@ public class LangParser {
                 throw new ParseException("Type mismatch", currentPos);
             }
         }
-        
+
         //TODO time
-        
+
         if (av1.getType() == Double.class) {
             AttributeValue<?> av2 = argNum();
-            
+
             if ((av2.getType() == Double.class) || (av2.getType() == Long.class)) {
                 //TODO return new AttributeValue<DoubleRange>...
                 throw new UnsupportedOperationException("DoubleRange not supported yet");
@@ -194,10 +210,10 @@ public class LangParser {
                 throw new ParseException("Type mismatch", currentPos);
             }
         }
-        
+
         if (av1.getType() == Long.class) {
             AttributeValue<?> av2 = argNum();
-            
+
             if (av2.getType() == Long.class) {
                 return new AttributeValue<>(new LongRange((Long)av1.getValue(), (Long)av2.getValue()), LongRange.class);
             } else {
@@ -209,25 +225,45 @@ public class LangParser {
                 }
             }
         }
-        
+
         throw new ParseException(av1.getType() + " not supported", currentPos);
     }
-    
-    private char eatChar() {
+
+    private char readChar() {
         char next = input.charAt(currentPos);
         currentPos++;
         return next;
     }
-    
-    private boolean eatCharIfNotSpace() {
+
+    private boolean readCharIfNotSpace() {
         if (input.charAt(currentPos) == ' ') {
             return false;
         } else {
-            current = eatChar();
+            current = readChar();
             return true;
         }
     }
     
+    private String readString() {
+        String s = "";
+        while ((!isLastArg()) && (readCharIfNotSpace())) {
+            s += current;
+        }
+
+        return s;
+    }
+
+    private AttributeValue<String> readQuotedString() throws ParseException {
+        while ((!isLastArg()) && ((current = readChar()) != '\'')) {
+            alreadyRead += current;
+        }
+        if (current == '\'') {
+            return new AttributeValue<>(alreadyRead, String.class);
+        } else {
+            throw new ParseException("Closing quote expected", currentPos);
+        }
+    }
+
     private boolean accept(char c) {
         if (input.charAt(currentPos) == c) {
             currentPos++;
@@ -236,10 +272,10 @@ public class LangParser {
             return false;
         }
     }
-    
+
     private boolean acceptSpace() { //exactly one space
         if (accept(' ')) {
-            if (currentPos < input.length()) {
+            if (!isLastArg()) {
                 if (input.charAt(currentPos) == ' ') {
                     return false;
                 } else {
@@ -252,10 +288,10 @@ public class LangParser {
             return false;
         }
     }
-    
+
     private AttributeValue<?> createNumericAttributeValue() throws ParseException {
         AttributeValue<?> av;
-        
+
         try {
             Double num = Double.valueOf(alreadyRead);
             if (num.longValue() == num) {
@@ -268,10 +304,10 @@ public class LangParser {
         } catch (NumberFormatException e) {
             throw new ParseException("Number expected", currentPos);
         }
-        
+
         return av;
     }
-    
+
     private int getInteger(String s) throws ParseException { //expect non-negative integer
         int num;
         try {
@@ -281,38 +317,38 @@ public class LangParser {
         }
         return num;
     }
-    
-    private int getIntegerUntil(char until) throws ParseException {
+
+    private int readIntegerUntil(char until) throws ParseException {
         alreadyRead += current;
         String string = "";
-        while ((currentPos < input.length()) && (eatCharIfNotSpace()) && (current != until)) {
+        while ((!isLastArg()) && (readCharIfNotSpace()) && (current != until)) {
             string += current;
             alreadyRead += current;
         }
-        
-        if ((currentPos == input.length()) || (current == ' ')) {
+
+        if ((isLastArg()) || (current == ' ')) {
             throw new ParseException("Unexpected end of input", currentPos);
         }
-        
+
         return getInteger(string);
     }
-    
+
     private Constraint<?> createConstraint(AttributeValue<?> av, Operator operator) throws ParseException {
         if (! isLastArg()) {
             throw new ParseException("End of input expected", currentPos);
         }
-        
+
         if (av == null) {
             throw new ParseException("Failed to parse \'" + alreadyRead + "\'", currentPos);
         }
-        
+
         if (operator == null) {
             throw new ParseException("Unsupported Operator", currentPos);
         }
-        
+
         return new Constraint<>(attributeName, av, operator);
     }
-    
+
     private boolean isLastArg() {
         if (currentPos < input.length()) {
             return false;
